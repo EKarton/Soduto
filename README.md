@@ -19,6 +19,7 @@ Check it on [soduto.com](https://www.soduto.com)
     `git clone --recurse-submodules https://github.com/soduto/Soduto.git Soduto`
 
 * Open project `Soduto.xcodeproj` with XCode
+* Change your signing team to your own personal team in `Soduto > Signing & Capabilities > Sudoto` and `Soduto > Signing & Capabilities > Sudoto Browser`
 * Build target `Soduto`
 
 ## Debugging
