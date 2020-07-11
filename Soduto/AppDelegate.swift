@@ -57,7 +57,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DeviceManagerDelegate {
         self.statusBarMenuController.config = self.config
         self.deviceManager.delegate = self
         
-        //self.serviceManager.add(service: NotificationsService())
+        self.serviceManager.add(service: NotificationsService())
         self.serviceManager.add(service: ClipboardService())
         self.serviceManager.add(service: SftpService())
         self.serviceManager.add(service: ShareService())
