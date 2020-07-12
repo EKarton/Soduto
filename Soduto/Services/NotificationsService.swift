@@ -65,6 +65,7 @@ public class NotificationsService: Service, UserNotificationActionHandler {
     
     /// Delivered notification ids grouped by device
     private var notificationIds: [Device.Id: Set<NotificationId>] = [:]
+    
         
     // MARK: Service methods
     
@@ -112,6 +113,7 @@ public class NotificationsService: Service, UserNotificationActionHandler {
     
     
     // MARK: UserNotificationActionHandler
+    
     public static func handleAction(for notification: NSUserNotification, context: UserNotificationContext) {
         guard let userInfo = notification.userInfo else { return }
         guard let deviceId = userInfo[UserInfoProperty.deviceId.rawValue] as? String else { return }
@@ -188,7 +190,6 @@ public class NotificationsService: Service, UserNotificationActionHandler {
             
             // Add a reply button
             if dataPacket.body["requestReplyId"] != nil {
-                notification.hasActionButton = true
                 notification.hasReplyButton = true
             }
             
