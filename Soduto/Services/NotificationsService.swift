@@ -52,6 +52,7 @@ public class NotificationsService: Service, UserNotificationActionHandler {
         case deviceId = "com.soduto.services.notifications.deviceId"
         case notificationId = "com.soduto.services.notifications.notificationId"
         case isCancelable = "com.soduto.services.notifications.isCancelable"
+        case replyId = "com.soduto.services.notifications.replyId"
     }
     
     
@@ -64,8 +65,7 @@ public class NotificationsService: Service, UserNotificationActionHandler {
     
     /// Delivered notification ids grouped by device
     private var notificationIds: [Device.Id: Set<NotificationId>] = [:]
-    
-    
+        
     // MARK: Service methods
     
     public func handleDataPacket(_ dataPacket: DataPacket, fromDevice device: Device, onConnection connection: Connection) -> Bool {
@@ -112,17 +112,25 @@ public class NotificationsService: Service, UserNotificationActionHandler {
     
     
     // MARK: UserNotificationActionHandler
-    
     public static func handleAction(for notification: NSUserNotification, context: UserNotificationContext) {
         guard let userInfo = notification.userInfo else { return }
         guard let deviceId = userInfo[UserInfoProperty.deviceId.rawValue] as? String else { return }
         guard let notificationId = userInfo[UserInfoProperty.notificationId.rawValue] as? NotificationId else { return }
         guard let isCancelable = userInfo[UserInfoProperty.isCancelable.rawValue] as? NSNumber else { return }
+        
         guard let device = context.deviceManager.device(withId: deviceId) else { return }
         guard device.pairingStatus == .Paired else { return }
         
         if isCancelable.boolValue {
             device.send(DataPacket.notificationCancelPacket(forId: notificationId))
+        }
+        
+        // Reply back to the notification if there is a response from the user
+        if let response = notification.response {
+            let responseText = response.string
+            if let replyId = userInfo[UserInfoProperty.replyId.rawValue] as? String {
+                device.send(DataPacket.notificationReplyPacket(replyId: replyId, text: responseText))
+            }
         }
         
         for service in context.serviceManager.services {
@@ -156,23 +164,35 @@ public class NotificationsService: Service, UserNotificationActionHandler {
             let isSilent = try dataPacket.getSilentFlag()
             let isCancelable = try dataPacket.getClearableFlag()
             let dontPresent = isAnswer || isSilent
-            
+
             let notification = NSUserNotification.init(actionHandlerClass: type(of: self))
             var userInfo = notification.userInfo
             userInfo?[UserInfoProperty.deviceId.rawValue] = device.id as AnyObject
             userInfo?[UserInfoProperty.notificationId.rawValue] = packetNotificationId as AnyObject
             userInfo?[UserInfoProperty.isCancelable.rawValue] = NSNumber(value: isCancelable)
             userInfo?[UserNotificationManager.Property.dontPresent.rawValue] = NSNumber(value: dontPresent)
+            if let replyID = dataPacket.body["requestReplyId"] {
+                userInfo?[UserInfoProperty.replyId.rawValue] = replyID as AnyObject
+            }
+            
             notification.userInfo = userInfo
-            notification.title = "\(appName) | \(device.name)"
+            notification.title = "\(appName) (from \(device.name))"
             notification.informativeText = ticker
             if !dontPresent {
                 notification.soundName = NSUserNotificationDefaultSoundName
             }
+
             notification.hasActionButton = false
+            notification.hasReplyButton = false
             notification.identifier = notificationId
-            NSUserNotificationCenter.default.scheduleNotification(notification)
             
+            // Add a reply button
+            if dataPacket.body["requestReplyId"] != nil {
+                notification.hasActionButton = true
+                notification.hasReplyButton = true
+            }
+            
+            NSUserNotificationCenter.default.scheduleNotification(notification)
             self.addNotificationId(notificationId, from: device)
         }
         catch {
@@ -216,7 +236,6 @@ public class NotificationsService: Service, UserNotificationActionHandler {
         guard self.notificationIds[device.id] != nil else { return }
         _ = self.notificationIds[device.id]?.remove(id)
     }
-    
 }
 
 
@@ -243,8 +262,13 @@ fileprivate extension DataPacket {
     enum NotificationProperty: String {
         // all notifications request properties
         case request = "request"             // (boolean): True if we are requesting for current notifications
+        
         // cancel request properties (to notification originating device)
         case cancel = "cancel"               // (string): An id of notification to be canceled on originating device
+        
+        // reply to the notification properties
+        case replyId = "requestReplyId"     // (string): The ID used to reply back to the user
+        
         // notification info properties (from notification originating device)
         case id = "id"                       // (string): A unique notification id.
         case appName = "appName"             // (string): The app that generated the notification
@@ -259,6 +283,7 @@ fileprivate extension DataPacket {
     // MARK: Properties
     
     static let notificationPacketType = "kdeconnect.notification"
+    static let notificationReplyType = "kdeconnect.notification.reply"
     
     var isNotificationPacket: Bool { return self.type == DataPacket.notificationPacketType }
     
@@ -274,6 +299,13 @@ fileprivate extension DataPacket {
     static func notificationCancelPacket(forId id: String) -> DataPacket {
         return DataPacket(type: notificationPacketType, body: [
             NotificationProperty.cancel.rawValue: id as AnyObject
+        ])
+    }
+    
+    static func notificationReplyPacket(replyId: String, text: String) -> DataPacket {
+        return DataPacket(type: notificationReplyType, body: [
+            "requestReplyId": replyId as AnyObject,
+            "message": text as AnyObject
         ])
     }
     
