@@ -123,18 +123,38 @@ public class NotificationsService: Service, UserNotificationActionHandler {
         guard let device = context.deviceManager.device(withId: deviceId) else { return }
         guard device.pairingStatus == .Paired else { return }
         
-        if isCancelable.boolValue {
-            device.send(DataPacket.notificationCancelPacket(forId: notificationId))
-        }
-        
-        // Reply back to the notification if there is a response from the user
-        if let response = notification.response {
-            let responseText = response.string
-            if let replyId = userInfo[UserInfoProperty.replyId.rawValue] as? String {
-                device.send(DataPacket.notificationReplyPacket(replyId: replyId, text: responseText))
+        if notification.activationType == .replied {
+            // Reply back to the notification if there is a response from the user
+            if let response = notification.response {
+                let responseText = response.string
+                if let replyId = userInfo[UserInfoProperty.replyId.rawValue] as? String {
+                    device.send(DataPacket.notificationReplyPacket(replyId: replyId, text: responseText))
+                }
+            }
+            
+        } else if notification.activationType == .additionalActionClicked {
+            
+            // When the action is selected, it will send an action packet
+            if let actionClicked = notification.additionalActivationAction{
+                if let actionName: String = actionClicked.identifier {
+                    device.send(DataPacket.notificationActionPacket(notificationId: notificationId, action: actionName))
+                }
+            }
+            
+        } else if notification.activationType == .contentsClicked {
+            
+            // TODO: If the contents of the notification was clicked, open the app
+            print("I AM HERE")
+            
+        } else {
+            
+            // Is when the dismiss button was clicked
+            if isCancelable.boolValue {
+                device.send(DataPacket.notificationCancelPacket(forId: notificationId))
             }
         }
         
+        // Remove the notification
         for service in context.serviceManager.services {
             guard let notificationsService = service as? NotificationsService else { continue }
             notificationsService.removeNotificationId(notificationId, from: device)
@@ -168,6 +188,7 @@ public class NotificationsService: Service, UserNotificationActionHandler {
             let dontPresent = isAnswer || isSilent
 
             let notification = NSUserNotification.init(actionHandlerClass: type(of: self))
+            
             var userInfo = notification.userInfo
             userInfo?[UserInfoProperty.deviceId.rawValue] = device.id as AnyObject
             userInfo?[UserInfoProperty.notificationId.rawValue] = packetNotificationId as AnyObject
@@ -176,21 +197,40 @@ public class NotificationsService: Service, UserNotificationActionHandler {
             if let replyID = dataPacket.body["requestReplyId"] {
                 userInfo?[UserInfoProperty.replyId.rawValue] = replyID as AnyObject
             }
-            
             notification.userInfo = userInfo
+            
             notification.title = "\(appName) (from \(device.name))"
             notification.informativeText = ticker
             if !dontPresent {
                 notification.soundName = NSUserNotificationDefaultSoundName
             }
-
+            
             notification.hasActionButton = false
             notification.hasReplyButton = false
             notification.identifier = notificationId
             
+            // Add the dismiss button
+            notification.otherButtonTitle = "Dismiss"
+            
             // Add a reply button
             if dataPacket.body["requestReplyId"] != nil {
                 notification.hasReplyButton = true
+            }
+            
+            // Add the actions button
+            if let actions = dataPacket.body["actions"] as? [String]{
+                notification.hasActionButton = true
+                
+                var actionBttns = [NSUserNotificationAction]()
+                
+                for action in actions {
+                    actionBttns.append(NSUserNotificationAction(identifier: action, title: action))
+                }
+                
+                notification.additionalActions = actionBttns
+                
+                // Hack: Show the down arrow
+                notification.setValue(true, forKey: "_alwaysShowAlternateActionMenu")
             }
             
             NSUserNotificationCenter.default.scheduleNotification(notification)
@@ -285,6 +325,7 @@ fileprivate extension DataPacket {
     
     static let notificationPacketType = "kdeconnect.notification"
     static let notificationReplyType = "kdeconnect.notification.reply"
+    static let notificationActionType = "kdeconnect.notification.action"
     
     var isNotificationPacket: Bool { return self.type == DataPacket.notificationPacketType }
     
@@ -307,6 +348,13 @@ fileprivate extension DataPacket {
         return DataPacket(type: notificationReplyType, body: [
             "requestReplyId": replyId as AnyObject,
             "message": text as AnyObject
+        ])
+    }
+    
+    static func notificationActionPacket(notificationId: String, action: String) -> DataPacket {
+        return DataPacket(type: notificationActionType, body: [
+            "key": notificationId as AnyObject,
+            "action": action as AnyObject
         ])
     }
     
